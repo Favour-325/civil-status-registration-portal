@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect } from 'react';
+import { useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { fetchAuthSession } from 'aws-amplify/auth';
 
-export default function AuthCallbackPage() {
+function AuthCallback() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -62,5 +62,14 @@ export default function AuthCallbackPage() {
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
       </div>
     </div>
+  );
+}
+
+// useSearchParams must sit under a Suspense boundary for the static export build.
+export default function AuthCallbackPage() {
+  return (
+    <Suspense fallback={null}>
+      <AuthCallback />
+    </Suspense>
   );
 }

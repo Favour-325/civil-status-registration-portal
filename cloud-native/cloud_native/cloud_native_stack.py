@@ -6,6 +6,7 @@ from aws_cdk import (
     Stack,
     RemovalPolicy,
     aws_lambda as lambda_,
+    aws_iam as iam,
     aws_sqs as sqs,
     aws_events as events,
     aws_events_targets as targets,
@@ -13,7 +14,9 @@ from aws_cdk import (
     aws_dynamodb as dynamodb,
     aws_apigateway as apigateway,
     aws_secretsmanager as secretsmanager,
-    aws_s3 as s3
+    aws_s3 as s3,
+    aws_cloudfront as cloudfront,
+    aws_cloudfront_origins as origins
 )
 from constructs import Construct
 
@@ -28,6 +31,17 @@ CITIZEN_PORTAL_URL = "http://localhost:3000"
 # Cognito hosted-UI domain prefixes are globally unique per region. The citizen
 # pool already holds "ccsrp".
 ADMIN_DOMAIN_PREFIX = "ccsrp-admin"
+
+# The GitHub repo GitHub Actions deploys from. The OIDC role trusts only this
+# repo, and only its main branch.
+GITHUB_REPO = "Favour-325/civil-status-registration-portal"
+
+# PHASE 3: after the first `cdk deploy`, set these to the CloudFront distribution
+# URLs from the stack outputs (e.g. "https://d111abcdef8.cloudfront.net"), scheme
+# + host, no trailing slash, then deploy again. Empty keeps only the localhost
+# dev origins wired for Cognito callbacks and the document-upload CORS.
+ADMIN_SITE_ORIGIN = "https://d3fqct9ugp4fl8.cloudfront.net"
+CITIZEN_SITE_ORIGIN = "https://dpcqabdpbc9dz.cloudfront.net"
 
 class CloudNativeStack(Stack):
 
@@ -84,9 +98,14 @@ class CloudNativeStack(Stack):
                     cognito.OAuthScope.COGNITO_ADMIN,
                 ],
                 # Must match lib/amplify-config.ts exactly, or Cognito rejects the
-                # redirect with redirect_mismatch.
-                callback_urls = [f"{ADMIN_PORTAL_URL}/auth/callback"],
-                logout_urls = [f"{ADMIN_PORTAL_URL}/"],
+                # redirect with redirect_mismatch. localhost is for `next dev`; the
+                # CloudFront origin (Phase 3) is the deployed site.
+                callback_urls = [f"{ADMIN_PORTAL_URL}/auth/callback"] + (
+                    [f"{ADMIN_SITE_ORIGIN}/auth/callback"] if ADMIN_SITE_ORIGIN else []
+                ),
+                logout_urls = [f"{ADMIN_PORTAL_URL}/"] + (
+                    [f"{ADMIN_SITE_ORIGIN}/"] if ADMIN_SITE_ORIGIN else []
+                ),
             )
         )
 
@@ -396,8 +415,11 @@ class CloudNativeStack(Stack):
             cors = [
                 s3.CorsRule(
                     # The browser POSTs the file directly here using a presigned policy.
+                    # localhost is for `next dev`; the CloudFront origin is Phase 3.
                     allowed_methods = [s3.HttpMethods.POST],
-                    allowed_origins = [CITIZEN_PORTAL_URL],
+                    allowed_origins = [CITIZEN_PORTAL_URL] + (
+                        [CITIZEN_SITE_ORIGIN] if CITIZEN_SITE_ORIGIN else []
+                    ),
                     allowed_headers = ["*"],
                     max_age = 3000
                 )
@@ -543,6 +565,116 @@ class CloudNativeStack(Stack):
         event_bus.grant_put_events_to(update_marriage_application_lambda)
         event_bus.grant_put_events_to(contact_service_lambda)
 
+        # --- Frontend static hosting (S3 + CloudFront) ---
+        # Each portal is a static export (next build with output: 'export') synced
+        # to a private bucket and served through CloudFront. Content is deployed by
+        # GitHub Actions (s3 sync + invalidation); CDK only provisions the plumbing.
+
+        # No explicit bucket_name: S3 names are globally unique and nothing refers
+        # to these by literal name. auto_delete_objects lets `cdk destroy` empty
+        # them (they will hold synced site files).
+        citizens_site_bucket = s3.Bucket(
+            self, "CitizensSiteBucket",
+            block_public_access = s3.BlockPublicAccess.BLOCK_ALL,
+            encryption = s3.BucketEncryption.S3_MANAGED,
+            removal_policy = RemovalPolicy.DESTROY,
+            auto_delete_objects = True
+        )
+        admin_site_bucket = s3.Bucket(
+            self, "AdminSiteBucket",
+            block_public_access = s3.BlockPublicAccess.BLOCK_ALL,
+            encryption = s3.BucketEncryption.S3_MANAGED,
+            removal_policy = RemovalPolicy.DESTROY,
+            auto_delete_objects = True
+        )
+
+        # `next build` with trailingSlash emits route/index.html. This viewer
+        # request function maps a directory or extensionless URI onto the file
+        # CloudFront must fetch, so deep links (/apply/, /auth/callback) resolve.
+        # Shared: it is stateless.
+        spa_uri_rewrite = cloudfront.Function(
+            self, "SpaUriRewrite",
+            code = cloudfront.FunctionCode.from_inline(
+                "function handler(event){"
+                "var r=event.request;var u=r.uri;"
+                "if(u.endsWith('/'))r.uri+='index.html';"
+                "else if(!u.includes('.'))r.uri+='/index.html';"
+                "return r;}"
+            )
+        )
+
+        def site_distribution(construct_id, bucket):
+            return cloudfront.Distribution(
+                self, construct_id,
+                default_root_object = "index.html",
+                default_behavior = cloudfront.BehaviorOptions(
+                    # OAC writes the bucket policy so only this distribution can
+                    # read the (private) bucket — no public access, no legacy OAI.
+                    origin = origins.S3BucketOrigin.with_origin_access_control(bucket),
+                    viewer_protocol_policy = cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+                    function_associations = [cloudfront.FunctionAssociation(
+                        function = spa_uri_rewrite,
+                        event_type = cloudfront.FunctionEventType.VIEWER_REQUEST
+                    )]
+                ),
+                # A missing object behind OAC returns 403, not 404; map both to the
+                # exported 404 page so unknown paths render it rather than raw XML.
+                error_responses = [
+                    cloudfront.ErrorResponse(
+                        http_status = 403, response_http_status = 404,
+                        response_page_path = "/404.html"
+                    ),
+                    cloudfront.ErrorResponse(
+                        http_status = 404, response_http_status = 404,
+                        response_page_path = "/404.html"
+                    ),
+                ]
+            )
+
+        citizens_distribution = site_distribution("CitizensSiteDistribution", citizens_site_bucket)
+        admin_distribution = site_distribution("AdminSiteDistribution", admin_site_bucket)
+
+        # --- GitHub Actions deploy identity (OIDC, no stored keys) ---
+        # NOTE: only one GitHub OIDC provider may exist per AWS account. If this
+        # account already has one, replace this with
+        # iam.OpenIdConnectProvider.from_open_id_connect_provider_arn(...).
+        github_oidc_provider = iam.OpenIdConnectProvider(
+            self, "GithubOidcProvider",
+            url = "https://token.actions.githubusercontent.com",
+            client_ids = ["sts.amazonaws.com"]
+        )
+
+        github_deploy_role = iam.Role(
+            self, "GithubFrontendDeployRole",
+            role_name = "civil-registry-frontend-deploy",
+            description = "Assumed by GitHub Actions to deploy the static frontends",
+            # Trust only this repo on main: a workflow on any other repo or branch
+            # cannot assume the role.
+            assumed_by = iam.OpenIdConnectPrincipal(
+                github_oidc_provider,
+                conditions = {
+                    "StringEquals": {
+                        "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
+                    },
+                    "StringLike": {
+                        "token.actions.githubusercontent.com:sub": f"repo:{GITHUB_REPO}:ref:refs/heads/main"
+                    }
+                }
+            )
+        )
+
+        # Exactly the permissions `aws s3 sync --delete` + invalidation need,
+        # scoped to these two sites and nothing else.
+        citizens_site_bucket.grant_read_write(github_deploy_role)
+        admin_site_bucket.grant_read_write(github_deploy_role)
+        github_deploy_role.add_to_policy(iam.PolicyStatement(
+            actions = ["cloudfront:CreateInvalidation"],
+            resources = [
+                f"arn:aws:cloudfront::{self.account}:distribution/{citizens_distribution.distribution_id}",
+                f"arn:aws:cloudfront::{self.account}:distribution/{admin_distribution.distribution_id}",
+            ]
+        ))
+
         # --- Outputs ---
         # These are exactly the four values admin-portal/.env.local needs. They
         # were previously read out of the console by hand, which is how the
@@ -568,5 +700,42 @@ class CloudNativeStack(Stack):
             self, "ApiUrl",
             value = api.url,
             description = "NEXT_PUBLIC_API_URL (strip the trailing slash)"
+        )
+
+        # --- Frontend hosting outputs (Phase 3 config + GitHub Actions variables) ---
+        CfnOutput(
+            self, "CitizensBucketName",
+            value = citizens_site_bucket.bucket_name,
+            description = "GitHub var CITIZENS_BUCKET"
+        )
+        CfnOutput(
+            self, "CitizensDistributionId",
+            value = citizens_distribution.distribution_id,
+            description = "GitHub var CITIZENS_DISTRIBUTION_ID"
+        )
+        CfnOutput(
+            self, "CitizensSiteUrl",
+            value = f"https://{citizens_distribution.distribution_domain_name}",
+            description = "Citizens portal URL — set CITIZEN_SITE_ORIGIN (Phase 3)"
+        )
+        CfnOutput(
+            self, "AdminBucketName",
+            value = admin_site_bucket.bucket_name,
+            description = "GitHub var ADMIN_BUCKET"
+        )
+        CfnOutput(
+            self, "AdminDistributionId",
+            value = admin_distribution.distribution_id,
+            description = "GitHub var ADMIN_DISTRIBUTION_ID"
+        )
+        CfnOutput(
+            self, "AdminSiteUrl",
+            value = f"https://{admin_distribution.distribution_domain_name}",
+            description = "GitHub var NEXT_PUBLIC_ADMIN_URL + set ADMIN_SITE_ORIGIN (Phase 3)"
+        )
+        CfnOutput(
+            self, "GithubDeployRoleArn",
+            value = github_deploy_role.role_arn,
+            description = "GitHub var AWS_DEPLOY_ROLE_ARN"
         )
 

@@ -1,0 +1,62 @@
+name: Deploy citizens portal
+
+# Build on every PR that touches this portal (a gate — no AWS access).
+# Build AND deploy when an approved change lands on main.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'frontend/citizens-portal/**'
+      - '.github/workflows/citizens-portal.yml'
+  pull_request:
+    paths:
+      - 'frontend/citizens-portal/**'
+      - '.github/workflows/citizens-portal.yml'
+  workflow_dispatch:
+
+# Supersede queued PR builds, but let a main deploy finish uninterrupted.
+concurrency:
+  group: citizens-portal-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  id-token: write   # required to assume the AWS deploy role via OIDC
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend/citizens-portal
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/citizens-portal/package-lock.json
+
+      - run: npm ci
+
+      - name: Build static export
+        run: npm run build
+        env:
+          NEXT_PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL }}
+
+      # --- Deploy: only for an approved change on main ---
+      - name: Configure AWS credentials
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Sync to S3 and invalidate CloudFront
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          aws s3 sync out "s3://${{ vars.CITIZENS_BUCKET }}" --delete
+          aws cloudfront create-invalidation \
+            --distribution-id "${{ vars.CITIZENS_DISTRIBUTION_ID }}" \
+            --paths "/*"

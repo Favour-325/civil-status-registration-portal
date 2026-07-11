@@ -5,5 +5,5 @@ frontend/*/.env.local
 cloud-native/.venv/
 cloud-native/cdk.out/
 __pycache__/
-*.pyc,
+*.pyc
 .DS_Store

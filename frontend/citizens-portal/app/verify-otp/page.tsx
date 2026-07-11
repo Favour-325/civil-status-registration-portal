@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Mail } from "lucide-react";
 
@@ -18,7 +18,7 @@ const COLORS = {
 const CODE_LENGTH = 6;
 const RESEND_COOLDOWN = 30; // seconds
 
-export default function OTPVerificationPage() {
+function OTPVerification() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const email = searchParams.get("email") ?? "";
@@ -201,5 +201,14 @@ export default function OTPVerificationPage() {
         </p>
       </div>
     </div>
+  );
+}
+
+// useSearchParams must sit under a Suspense boundary for the static export build.
+export default function OTPVerificationPage() {
+  return (
+    <Suspense fallback={null}>
+      <OTPVerification />
+    </Suspense>
   );
 }
