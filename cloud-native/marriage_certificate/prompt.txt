@@ -1,0 +1,689 @@
+You are a senior Python software engineer and software architect.
+
+Your task is to build a professional, modular document generation engine using Python and fpdf2 that reproduces the official bilingual (French/English) Cameroonian Marriage Certificate almost identically to the provided template.
+
+This is NOT simply about generating one PDF.
+
+The objective is to build a reusable document rendering framework capable of supporting multiple government documents in the future.
+
+The project must follow SOLID principles, clean architecture, and high-quality software engineering practices.
+
+====================================================
+GENERAL REQUIREMENTS
+====================================================
+
+Language:
+- Python 3.12+
+
+Library:
+- fpdf2
+
+Coding style:
+- Fully typed (type hints)
+- Object-oriented
+- Modular
+- Reusable
+- Well documented
+- Clean naming
+- No duplicated code
+- No magic numbers
+- Separate layout from rendering logic
+
+Everything except the official seal image must be drawn using fpdf2 primitives.
+
+DO NOT use the scanned marriage certificate as a page background.
+
+The generated PDF should be vector-based and printable.
+
+The rendered certificate should visually match the official certificate as closely as possible.
+
+====================================================
+PROJECT STRUCTURE
+====================================================
+
+Create the following structure.
+
+marriage_certificate/
+
+    assets/
+
+        official_stamp.png
+
+        fonts/
+
+            Inter-Regular.ttf
+
+            Inter-Bold.ttf
+
+            Inter-Italic.ttf
+
+    certificate/
+
+        __init__.py
+
+        constants.py
+
+        layout.py
+
+        drawing.py
+
+        models.py
+
+        cursor.py
+
+        header.py
+
+        marriage_information.py
+
+        groom_section.py
+
+        bride_section.py
+
+        legal_declaration.py
+
+        witnesses.py
+
+        footer.py
+
+        template.py
+
+        generator.py
+
+    example.py
+
+    requirements.txt
+
+====================================================
+FONT
+====================================================
+
+Use the Inter font family.
+
+Register
+
+Inter-Regular.ttf
+
+Inter-Bold.ttf
+
+Inter-Italic.ttf
+
+Do not use Helvetica.
+
+====================================================
+PAGE SETTINGS
+====================================================
+
+Page size:
+A4 Portrait
+
+Unit:
+millimetres
+
+Margins:
+Stored as constants.
+
+Never hardcode margins inside rendering modules.
+
+====================================================
+LAYOUT CONSTANTS
+====================================================
+
+Create constants including
+
+PAGE_WIDTH
+
+PAGE_HEIGHT
+
+LEFT_MARGIN
+
+RIGHT_MARGIN
+
+TOP_MARGIN
+
+BOTTOM_MARGIN
+
+BODY_WIDTH
+
+DEFAULT_LINE_HEIGHT
+
+FIELD_SPACING
+
+SECTION_SPACING
+
+TITLE_FONT_SIZE
+
+BODY_FONT_SIZE
+
+LABEL_FONT_SIZE
+
+SMALL_TEXT_SIZE
+
+SIGNATURE_AREA_HEIGHT
+
+HEADER_START_Y
+
+TITLE_Y
+
+FOOTER_Y
+
+etc.
+
+====================================================
+LAYOUT SYSTEM
+====================================================
+
+Create layout.py.
+
+Do NOT hardcode section positions inside rendering modules.
+
+Instead create named anchors.
+
+Example
+
+HEADER_TOP
+
+CERTIFICATE_TITLE_TOP
+
+GROOM_SECTION_TOP
+
+BRIDE_SECTION_TOP
+
+LEGAL_SECTION_TOP
+
+WITNESS_SECTION_TOP
+
+SIGNATURE_SECTION_TOP
+
+Every renderer should reference these anchors.
+
+====================================================
+CURSOR
+====================================================
+
+Create a Cursor class.
+
+It should manage vertical movement.
+
+Example
+
+cursor = Cursor(x=15, y=72)
+
+cursor.next()
+
+This avoids manually calculating every Y coordinate.
+
+====================================================
+DRAWING UTILITIES
+====================================================
+
+Create reusable helper functions.
+
+Examples
+
+draw_label()
+
+draw_value()
+
+draw_field()
+
+draw_dotted_line()
+
+draw_multiline_field()
+
+draw_horizontal_rule()
+
+draw_section_title()
+
+draw_centered_text()
+
+draw_signature_line()
+
+draw_wrapped_text()
+
+draw_image()
+
+draw_two_column_text()
+
+draw_inline_label_value()
+
+Do not repeat formatting code.
+
+====================================================
+DATA MODELS
+====================================================
+
+Use dataclasses.
+
+Create
+
+Person
+
+ParentNames
+
+ReferenceDocument
+
+MarriageInformation
+
+Witness
+
+Representative
+
+Registration
+
+MarriageCertificate
+
+Suggested structure
+
+Person
+
+- full_name
+- birth_date
+- birth_place
+- occupation
+- nationality
+- residence
+- reference_document
+
+ParentNames
+
+- father_name
+- mother_name
+
+ReferenceDocument
+
+- document_type
+- document_number
+
+MarriageInformation
+
+- marriage_date
+- marriage_place
+- matrimonial_regime
+- marriage_type
+
+Witness
+
+- full_name
+
+Representative
+
+- full_name
+
+Registration
+
+- region
+- division
+- subdivision
+- arrondissement
+- registration_center
+- attachment_center
+- certificate_number
+- issue_date
+- registrar_name
+- secretary_name
+
+MarriageCertificate
+
+- groom
+- groom_parents
+- bride
+- bride_parents
+- marriage_information
+- groom_representative
+- bride_representative
+- groom_witness
+- bride_witness
+- registration
+
+Models should contain data only.
+
+No rendering logic.
+
+====================================================
+HEADER MODULE
+====================================================
+
+Responsible ONLY for
+
+Government heading
+
+Republic heading
+
+Peace - Work - Fatherland
+
+Region
+
+Department
+
+Arrondissement
+
+Division
+
+Subdivision
+
+Civil Status Registration Centre
+
+Attachment Centre
+
+Official stamp image
+
+Marriage Certificate title
+
+Certificate number
+
+Nothing else.
+
+====================================================
+MARRIAGE INFORMATION SECTION
+====================================================
+
+Render
+
+Marriage of
+
+And of
+
+On the
+
+These fields appear immediately below the title.
+
+====================================================
+GROOM SECTION
+====================================================
+
+Render exactly like the official template.
+
+Include
+
+Appeared publicly
+
+Mr.
+
+Born on
+
+At
+
+Occupation
+
+Nationality
+
+Reference document
+
+Residence
+
+Son of
+
+and of
+
+All bilingual labels must match the official wording.
+
+====================================================
+BRIDE SECTION
+====================================================
+
+Render
+
+Miss
+
+Born on
+
+At
+
+Occupation
+
+Nationality
+
+Reference document
+
+Residence
+
+Daughter of
+
+and of
+
+Exactly following the template.
+
+====================================================
+LEGAL DECLARATION
+====================================================
+
+This section contains legal statements with embedded dynamic fields.
+
+Do NOT model this as simple independent labels.
+
+Render the legal sentences exactly as the template.
+
+Dynamic placeholders should be inserted inside the sentences.
+
+Include
+
+The bride and groom declare the matrimonial regime
+
+Community or separation of property
+
+Marriage type
+
+Monogamy
+
+Polygamy
+
+No objections to marriage have been recorded
+
+The declaration that both wish to be husband and wife
+
+The pronouncement by the Civil Status Registrar
+
+Maintain the original bilingual formatting.
+
+====================================================
+REPRESENTATIVES
+====================================================
+
+Render
+
+Head of the husband's family or representative
+
+Head of the wife's family or representative
+
+Their names should be dynamic.
+
+====================================================
+WITNESSES
+====================================================
+
+Render
+
+Witness of the husband
+
+Witness of the wife
+
+Dynamic names.
+
+====================================================
+FOOTER
+====================================================
+
+Render
+
+Certificate drawn by us
+
+Registrar
+
+Secretary
+
+Date
+
+Bride and bridegroom signatures
+
+Witness signatures
+
+Civil Status Registrar signature
+
+Secretary signature
+
+====================================================
+IMAGE
+====================================================
+
+official_stamp.png contains
+
+Official circular stamp
+
+Cameroon coat of arms
+
+Draw it in the upper-right corner.
+
+Preserve aspect ratio.
+
+====================================================
+ALIGNMENT
+====================================================
+
+The certificate relies heavily on inline text.
+
+Many labels share the same line.
+
+Examples
+
+Born on ......... At .........
+
+Son of ......... and of .........
+
+The rendering engine must support inline placeholder fields.
+
+Avoid treating every field as a separate row.
+
+====================================================
+WRAPPING
+====================================================
+
+Several legal paragraphs span multiple lines.
+
+Create helper functions that correctly wrap long bilingual text while preserving spacing and alignment.
+
+====================================================
+TEMPLATE
+====================================================
+
+Create
+
+MarriageCertificateTemplate
+
+Responsible for orchestrating the rendering.
+
+Example
+
+draw_header()
+
+draw_marriage_information()
+
+draw_groom()
+
+draw_bride()
+
+draw_legal_declaration()
+
+draw_witnesses()
+
+draw_footer()
+
+====================================================
+GENERATOR
+====================================================
+
+Create
+
+CertificateGenerator
+
+Usage
+
+generator = CertificateGenerator()
+
+generator.generate(
+    certificate,
+    "marriage_certificate.pdf"
+)
+
+====================================================
+QUALITY
+====================================================
+
+The marriage certificate is significantly more complex than the birth certificate.
+
+Many sections are composed of legal sentences containing embedded placeholders rather than isolated fields.
+
+Design the rendering engine to support:
+
+- inline placeholders
+- multiline legal paragraphs
+- bilingual formatting
+- mixed bold and regular text
+- left/right aligned text on the same line
+- dynamic line wrapping
+- reusable rendering helpers
+
+Avoid large procedural rendering functions.
+
+Favor reusable abstractions.
+
+====================================================
+IMPLEMENTATION ORDER
+====================================================
+
+Implement one file at a time.
+
+In this exact order.
+
+1. constants.py
+
+2. models.py
+
+3. cursor.py
+
+4. drawing.py
+
+5. layout.py
+
+6. header.py
+
+7. marriage_information.py
+
+8. groom_section.py
+
+9. bride_section.py
+
+10. legal_declaration.py
+
+11. witnesses.py
+
+12. footer.py
+
+13. template.py
+
+14. generator.py
+
+15. example.py
+
+Each file must be complete before moving to the next.
+
+Do NOT generate the whole project in one response.
+
+Wait for my approval before implementing the next file.
+
+====================================================
+FINAL EXPECTATION
+====================================================
+
+Assume this project will be evaluated by senior software engineers.
+
+Prioritize
+
+- maintainability
+- clean architecture
+- extensibility
+- accurate typography
+- reusable rendering components
+- professional code quality
+- faithful reproduction of the official Cameroonian Marriage Certificate.
+
+The final rendering should visually resemble the official certificate as closely as possible while remaining fully vector-based and generated entirely with Python and fpdf2.
